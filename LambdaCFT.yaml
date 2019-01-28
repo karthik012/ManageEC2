@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: CFT to create Lambdas
+Parameters:
+  LambdaName:
+    Description: Name of the lamba.
+    Type: String
+
+Resources:
+#----------------------------crate VPC---------------------------#
+  LAMBDAVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.31.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+      - Key: Name
+        Value: LAMBDAVPC
+# ----------------------create private subnets--------------------#
+  privateSubnet1:
+    Type: AWS::EC2::subnet
+    Properties:
+      VpcId: !Ref LAMBDAVPC
+      CidrBlock: 172.31.0.0/20
+      AvaliabilityZone: !Select
+        - 0
+        - !GetAZs
+          Ref: 'AWS::Region'
+      Tags:
+        - Key: Name
+          Value: privateSubnet1
+
+  privateSubnet2:
+      Type: AWS::EC2::subnet
+      Properties:
+        VpcId: !Ref LAMBDAVPC
+        CidrBlock: 172.31.16.0/20
+        AvaliabilityZone: !Select
+          - 0
+          - !GetAZs
+            Ref: 'AWS::Region'
+        Tags:
+          - Key: Name
+            Value: privateSubnet2
+
+# -------------------- create public subnets --------------------#
+  publicSubnet1:
+      Type: AWS::EC2::subnet
+      Properties:
+        VpcId: !Ref LAMBDAVPC
+        CidrBlock: 172.31.32.0/20
+        AvaliabilityZone: !Select
+          - 0
+          - !GetAZs
+            Ref: 'AWS::Region'
+        Tags:
+          - Key: Name
+            Value: publicSubnet1
+
+  publicSubnet2:
+      Type: AWS::EC2::subnet
+      Properties:
+        VpcId: !Ref LAMBDAVPC
+        CidrBlock: 172.31.48.0/20
+        AvaliabilityZone: !Select
+          - 0
+          - !GetAZs
+            Ref: 'AWS::Region'
+        Tags:
+          - Key: Name
+            Value: publicSubnet2
+#-----------Create Internet Gateway-------------#
+  myInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+        Tags:
+          - Key: Name
+            Value: myInternetGateway
+
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref LAMBDAVPC
+      InternetGatewayId: !Ref myInternetGateway
+#-------------Create route Tables---------------#
+  CustomRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref  LAMBDAVPC
+      Tags:
+      -Key: Name
+       Value: CustomRouteTable1
+
+  CustomRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref  LAMBDAVPC
+      Tags:
+      -Key: Name
+       Value: CustomRouteTable2
+
+#-----------  attach route tables ----------------#
+  mySubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref privateSubnet1
+      RouteTableId: !Ref myRouteTable
+
+  mySubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref privateSubnet2
+      RouteTableId: !Ref myRouteTable
+
+#---------public subnets get attached to CustomRouteTable------------#
+
+  mySubnetRouteTableAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref publicSubnet1
+      RouteTableId: !Ref CustomRouteTable
+
+  mySubnetRouteTableAssociation4:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref publicSubnet2
+      RouteTableId: !Ref CustomRouteTable
+  #------------- security group----------#
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Lambda ENIs
+      VpcId:
+        Ref: LAMBDAVPC
+      Tags:
+        - Key: Name
+          Value: LambdaSecurityGroup
+  #---------create Role --------------------------#
+  LambdaExecutionRole:
+  Type: "AWS::IAM::Role"
+  Properties:
+    AssumeRolePolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: "sts:AssumeRole"
+
+ #--------------- Create Lambdas -----------------------#
+
+  LambdaRDSCFNInit:
+    DependsOn:
+      - mySubnetRouteTableAssociation1
+      - mySubnetRouteTableAssociation2
+      - mySubnetRouteTableAssociation3
+      - mySubnetRouteTableAssociation4
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ManageEC2.lambda_handler
+      Description: "Lambda function which will execute when this CFN template is created, updated or deleted"
+      Runtime: python3.6
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 128
+      Timeout: 60
+      VpcConfig: # For accessing RDS instance
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref privateSubnet1
+          - !Ref privateSubnet2
+      Environment:
+        Variables:
+          sample: 12345
+
